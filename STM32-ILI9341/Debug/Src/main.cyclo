@@ -1,0 +1,5 @@
+../Drivers/CMSIS/Include/core_cm7.h:2229:22:SCB_EnableICache	1
+../Drivers/CMSIS/Include/core_cm7.h:2281:22:SCB_EnableDCache	3
+../Src/main.c:77:5:main	22
+../Src/main.c:568:6:SystemClock_Config	4
+../Src/main.c:628:6:Error_Handler	1
