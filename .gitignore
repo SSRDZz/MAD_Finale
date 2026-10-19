@@ -1,52 +1,83 @@
-# Prerequisites
-*.d
+# =============================================================
+# STM32CubeIDE / STM32CubeMX project
+# =============================================================
 
-# Object files
+# ---- Build output (regenerated on every build) ----
+/Debug/
+/Release/
+/build/
+/Build/
+/cmake-build-*/
+
+# Compiler / linker artefacts (also covers stray copies outside Debug/Release)
 *.o
-*.ko
 *.obj
+*.d
+*.dep
 *.elf
-
-# Linker output
-*.ilk
+*.axf
 *.map
-*.exp
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Libraries
-*.lib
-*.a
-*.la
-*.lo
-
-# Shared objects (inc. Windows DLLs)
-*.dll
-*.so
-*.so.*
-*.dylib
-
-# Executables
-*.exe
-*.out
-*.app
-*.i*86
-*.x86_64
-*.hex
-
-# Debug files
-*.dSYM/
+*.list
+*.lst
 *.su
-*.idb
-*.pdb
+*.cyclo
+*.srec
+*.hex
+*.bin
+*.a
+*.lib
 
-# Kernel Module Compile Results
-*.mod*
-*.cmd
-.tmp_versions/
-modules.order
-Module.symvers
-Mkfile.old
-dkms.conf
+# ---- CubeIDE / Eclipse workspace files (machine specific) ----
+/.metadata/
+/RemoteSystemsTempFiles/
+/.externalToolBuilders/
+.settings/language.settings.xml
+*.launch.bak
+.recommenders/
+.apt_generated/
+
+# ---- Debug probe logs / SWV / trace ----
+JLinkLog.txt
+*.rttlog
+*.swo
+*.itm
+openocd.log
+
+# ---- Backups and temp files ----
+*~
+*.bak
+*.orig
+*.tmp
+*.swp
+*.swo
+
+# ---- OS junk ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Other editors ----
+.vscode/
+.idea/
+
+# ---- Optional: other toolchains, in case you ever open the project in them ----
+# Keil MDK
+/MDK-ARM/**/*.o
+/MDK-ARM/**/*.d
+/MDK-ARM/Objects/
+/MDK-ARM/Listings/
+/MDK-ARM/RTE/
+*.uvguix.*
+# IAR
+/EWARM/settings/
+/EWARM/*/
+*.dep
+
+# =============================================================
+# KEEP these tracked (do NOT add them above):
+#   .project  .cproject  .mxproject  *.ioc   -> project + CubeMX config
+#   *.ld                                     -> linker scripts
+#   *.s  (Startup/)                          -> startup assembly
+#   Core/ (or Src/ Inc/), Drivers/           -> your code + HAL/CMSIS
+#   .settings/ (except language.settings.xml)
+# =============================================================
