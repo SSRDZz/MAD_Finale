@@ -28,6 +28,9 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "lcd_module.h"
+#include "ILI9341_Touchscreen.h"      // TP_Touchpad_Pressed
+#include "ILI9341_STM32_Driver.h"     // ILI9341_Init
+#include "ILI9341_GFX.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -107,7 +110,9 @@ int main(void)
   MX_USART3_UART_Init();
 
   /* USER CODE BEGIN 2 */
- LCD_Module_Init();
+  ILI9341_Init();
+  display_init();
+  display_ecg_set_scale(ECG_SCALE_AUTO, 250);
 
   /* USER CODE END 2 */
 
@@ -118,8 +123,27 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-		
-	  LCD_Module_Loop();
+	static t_display_data data = { .bpm=90, .spo2=96, .bp_sys=118, .bp_dia=76,
+	                                 .hrv_rmssd=45.0f, .pi=1.2f, .vascular_age=28.0f,
+	                                 .is_finger=1 };
+	static uint8_t  touch_prev = 0;
+	static uint32_t t_text = 0;
+
+	uint8_t touch_now = TP_Touchpad_Pressed() ? 1 : 0;
+	if (touch_now && !touch_prev)
+	{
+		display_next_screen();
+		t_text = 0;
+	}
+	touch_prev = touch_now;
+
+	if (HAL_GetTick() - t_text >= 200)
+	{
+		t_text = HAL_GetTick();
+		display_update(&data);
+	}
+	display_ecg_step();		// demo. real: display_ecg_push(adc);
+	HAL_Delay(10);
   }
   /* USER CODE END 3 */
 }
