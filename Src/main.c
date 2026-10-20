@@ -125,7 +125,7 @@ int main(void)
     /* USER CODE BEGIN 3 */
 	static t_display_data data = { .bpm=90, .spo2=96, .bp_sys=118, .bp_dia=76,
 	                                 .hrv_rmssd=45.0f, .pi=1.2f, .vascular_age=28.0f,
-	                                 .is_finger=0 };
+	                                 .is_finger=1 };
 	static uint8_t  touch_prev = 0;
 	static uint32_t t_text = 0;
 

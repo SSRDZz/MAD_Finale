@@ -2,6 +2,7 @@
 
 #include "ILI9341_STM32_Driver.h"
 #include "ILI9341_GFX.h"
+#include "stdlib.h"
 
 //===== Screen =====//
 #define SCREEN_W			320
@@ -248,7 +249,8 @@ void display_ecg_step(void)
 {
 	if (s_screen != SCREEN_MAIN || s_redraw)
 		return ;
-	ecg_draw_column(ECG_BASE_Y + ecg_offset(s_ecg_x % ECG_PERIOD));
+	/* random row inside the band, same 4 px padding that display_ecg_push() uses */
+	ecg_draw_column((ECG_TOP + 4) + (rand() % (ECG_BAND_H - 8 + 1)));
 }
 
 void display_ecg_set_scale(t_display_ecg_scale mode, uint16_t interval_sample)
