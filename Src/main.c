@@ -123,19 +123,38 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	static t_display_data data = { .bpm=90, .spo2=96, .bp_sys=118, .bp_dia=76,
-	                                 .hrv_rmssd=45.0f, .pi=1.2f, .vascular_age=28.0f,
-	                                 .is_finger=1 };
+  static t_collected_data data = { .bpm=90, .spo2=96, .bp_sys=118, .bp_dia=76,
+								   .hrv_rmssd=45.0f, .pi=1.2f, .vascular_age=28.0f,
+								   .is_finger=1, .weight=0 };
 	static uint8_t  touch_prev = 0;
 	static uint32_t t_text = 0;
 
-	uint8_t touch_now = TP_Touchpad_Pressed() ? 1 : 0;
-	if (touch_now && !touch_prev)
+	static uint32_t t_touch = 0;
+
+	if (display_get_screen() == SCREEN_WEIGHT)
 	{
-		display_next_screen();
-		t_text = 0;
+		/* poll while held (250 ms auto-repeat so +/- can be held) */
+		if (TP_Touchpad_Pressed() && HAL_GetTick() - t_touch >= 250)
+		{
+			uint16_t p[2];
+			if (TP_Read_Coordinates(p) == TOUCHPAD_DATA_OK)
+			{
+				display_touch(p[1], 239 - p[0]);   /* portrait -> landscape, see note */
+				t_touch = HAL_GetTick();
+			}
+		}
+		touch_prev = 1;      /* swallow the tap that confirmed OK */
 	}
-	touch_prev = touch_now;
+	else
+	{
+		uint8_t touch_now = TP_Touchpad_Pressed() ? 1 : 0;
+		if (touch_now && !touch_prev)
+		{
+			display_next_screen();
+			t_text = 0;
+		}
+		touch_prev = touch_now;
+	}
 
 	if (HAL_GetTick() - t_text >= 200)
 	{

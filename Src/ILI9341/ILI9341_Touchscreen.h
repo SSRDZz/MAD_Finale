@@ -112,10 +112,10 @@ if(TP_Touchpad_Pressed())
 #define TOUCHPAD_DATA_NOISY				0
 
 //HARDCODED CALIBRATION, CHANGE IF REQUIRED
-#define X_OFFSET									13
-#define Y_OFFSET									15
-#define X_MAGNITUDE								1.16
-#define Y_MAGNITUDE								1.16
+#define X_OFFSET									30
+#define Y_OFFSET									35
+#define X_MAGNITUDE								1.19
+#define Y_MAGNITUDE								1.15
 
 //CONVERTING 16bit Value to Screen coordinates
 // 65535/273 = 240!
@@ -128,7 +128,7 @@ if(TP_Touchpad_Pressed())
 //If library runs too slow decrease NO_OF_POSITION_SAMPLES, but
 //expect inreasingly noisy or incorrect locations returned
 
-#define NO_OF_POSITION_SAMPLES	 	1000
+#define NO_OF_POSITION_SAMPLES	 	400
 
 //Internal Touchpad command, do not call directly
 uint16_t TP_Read(void);

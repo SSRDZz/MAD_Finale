@@ -6,6 +6,7 @@
 
 //===== Screen =====//
 #define SCREEN_W			320
+#define SCREEN_H			240
 
 //===== Color =====//
 #define COLOR_BG			BLACK
@@ -45,14 +46,40 @@
 #define SUM_TEXT_SIZE		2
 
 
+//===== Weight screen layout =====//
+#define W_MIN				20
+#define W_MAX				250
+#define W_DEFAULT			70
+#define W_VALUE_X			70
+#define W_VALUE_Y			60
+#define W_VALUE_SIZE		5
+#define W_BTN_Y				130
+#define W_BTN_W				64
+#define W_BTN_LABEL_DX		0           /* (W_BTN_W - 2 chars * 12 px) / 2 */
+#define W_BTN_H				40
+#define W_OK_X				90
+#define W_OK_Y				190
+#define W_OK_W				140
+#define W_OK_H				40
+#define COLOR_BTN			0x2945      /* dark grey */
+
+#define DEBUG_TOUCH			1           /* 1 = plot a white dot at every touch position */
+
+/* touch lib output (portrait 240x320) -> landscape 320x240. Toggle until dot = finger */
+#define TOUCH_SWAP_XY		0           /* 1: x = raw[1], y = raw[0]; 0: x = raw[0], y = raw[1] (rescaled) */
+#define TOUCH_INV_X			1           /* x = 319 - x */
+#define TOUCH_INV_Y			1           /* y = 239 - y */
+
+
 //===== HRV status thresholds [ms] =====//
 #define HRV_RELAXED_MIN		40.0f
 #define HRV_STRESSED_MAX	25.0f
 
 
 //===== State =====//
-static t_display_screen		s_screen   = SCREEN_MAIN;
+static t_display_screen		s_screen   = SCREEN_WEIGHT;   /* weight first */
 static uint8_t				s_redraw   = 1;      /* need full clear */
+static uint16_t				s_weight   = W_DEFAULT;   /* [kg] */
 static uint16_t				s_ecg_x    = 0;
 static int16_t				s_prev_y   = ECG_BASE_Y;
 
@@ -64,6 +91,12 @@ static uint16_t				s_win_count  = 0;
 static uint16_t				s_win_min    = 4095, s_win_max = 0;    /* running interval */
 static uint16_t				s_act_min    = 0,    s_act_max = 4095; /* range used to draw */
 static uint8_t				s_act_valid  = 0;
+
+
+//===== Weight buttons =====//
+static const struct { uint16_t x; int8_t step; const char *label; } s_wbtn[4] = {
+	{  17, -5, "-5" }, {  91, -1, "-1" }, { 165, +1, "+1" }, { 239, +5, "+5" }
+};
 
 
 //===== Other =====//
@@ -127,7 +160,7 @@ static void ecg_draw_column(int16_t y)
 	}
 }
 
-static void draw_main(const t_display_data *d)
+static void draw_main(const t_collected_data *d)
 {
 	char	buf[24];
 
@@ -147,7 +180,7 @@ static void draw_main(const t_display_data *d)
 	}
 }
 
-static void draw_summary(const t_display_data *d)
+static void draw_summary(const t_collected_data *d)
 {
 	char		buf[32];
 	uint16_t	y = SUM_FIRST_Y;
@@ -207,17 +240,45 @@ static void draw_summary(const t_display_data *d)
 }
 
 
+static void draw_weight_value(void)
+{
+	char	buf[12];
+
+	snprintf(buf, sizeof(buf), "%3u kg", (unsigned)s_weight);
+	ILI9341_Draw_Text(buf, W_VALUE_X, W_VALUE_Y, COLOR_VALUE, W_VALUE_SIZE, COLOR_BG);
+}
+
+static void draw_weight(void)
+{
+	if (s_redraw)
+	{
+		ILI9341_Draw_Text("ENTER YOUR WEIGHT", 40, 15, COLOR_LABEL, 2, COLOR_BG);
+		for (uint8_t i = 0; i < 4; i++)
+		{
+			ILI9341_Draw_Rectangle(s_wbtn[i].x, W_BTN_Y, W_BTN_W, W_BTN_H, COLOR_BTN);
+			ILI9341_Draw_Text(s_wbtn[i].label, s_wbtn[i].x + W_BTN_LABEL_DX, W_BTN_Y + 13,
+							  COLOR_LABEL, 2, COLOR_BTN);
+		}
+		ILI9341_Draw_Rectangle(W_OK_X, W_OK_Y, W_OK_W, W_OK_H, COLOR_OK);
+		ILI9341_Draw_Text("OK", W_OK_X + 58, W_OK_Y + 13, COLOR_BG, 2, COLOR_OK);
+	}
+	draw_weight_value();
+}
+
+
 //===== Public Function =====//
 void display_init(void)
 {
 	ILI9341_Set_Rotation(SCREEN_HORIZONTAL_2);
 	ILI9341_Fill_Screen(COLOR_BG);
-	s_screen = SCREEN_MAIN;
+	s_screen = SCREEN_WEIGHT;
 	s_redraw = 1;
 }
 
 void display_next_screen(void)
 {
+	if (s_screen == SCREEN_WEIGHT)      /* locked until weight confirmed */
+		return ;
 	s_screen = (s_screen == SCREEN_MAIN) ? SCREEN_SUMMARY : SCREEN_MAIN;
 	s_redraw = 1;
 }
@@ -227,7 +288,67 @@ t_display_screen display_get_screen(void)
 	return (s_screen);
 }
 
-void display_update(const t_display_data *d)
+uint16_t display_get_weight(void)
+{
+	return (s_weight);
+}
+
+void display_touch(uint16_t raw_x, uint16_t raw_y)
+{
+	uint16_t	x;
+	uint16_t	y;
+
+#if TOUCH_SWAP_XY
+	x = raw_y;
+	y = raw_x;
+#else
+	/* lib range is 240 x 320 (portrait): rescale to 320 x 240 when not swapping */
+	x = (uint16_t)(((uint32_t)raw_x * SCREEN_W) / SCREEN_H);
+	y = (uint16_t)(((uint32_t)raw_y * SCREEN_H) / SCREEN_W);
+#endif
+	if (x > SCREEN_W - 1)
+		x = SCREEN_W - 1;
+	if (y > SCREEN_H - 1)
+		y = SCREEN_H - 1;
+#if TOUCH_INV_X
+	x = (SCREEN_W - 1) - x;
+#endif
+#if TOUCH_INV_Y
+	y = (SCREEN_H - 1) - y;
+#endif
+#if TOUCH_X_OFFSET
+	{
+		int16_t xo = (int16_t)x + TOUCH_X_OFFSET;
+
+		x = (xo < 0) ? 0 : (xo > SCREEN_W - 1) ? SCREEN_W - 1 : (uint16_t)xo;
+	}
+#endif
+#if DEBUG_TOUCH
+	ILI9341_Draw_Pixel(x, y, WHITE);
+#endif
+	if (s_screen != SCREEN_WEIGHT || s_redraw)
+		return ;
+	if (y >= W_BTN_Y && y < W_BTN_Y + W_BTN_H)
+	{
+		for (uint8_t i = 0; i < 4; i++)
+		{
+			if (x >= s_wbtn[i].x && x < s_wbtn[i].x + W_BTN_W)
+			{
+				int16_t w = (int16_t)s_weight + s_wbtn[i].step;
+				s_weight = (w < W_MIN) ? W_MIN : (w > W_MAX) ? W_MAX : (uint16_t)w;
+				draw_weight_value();
+				return ;
+			}
+		}
+	}
+	else if (y >= W_OK_Y && y < W_OK_Y + W_OK_H && x >= W_OK_X && x < W_OK_X + W_OK_W)
+	{
+		s_screen = SCREEN_MAIN;
+		s_redraw = 1;
+	}
+}
+
+void display_update(const t_collected_data *d)
 {
 	if (d == 0)
 		return ;
@@ -238,7 +359,9 @@ void display_update(const t_display_data *d)
 		s_prev_y = ECG_BASE_Y;
 		ecg_scale_reset();
 	}
-	if (s_screen == SCREEN_MAIN)
+	if (s_screen == SCREEN_WEIGHT)
+		draw_weight();
+	else if (s_screen == SCREEN_MAIN)
 		draw_main(d);
 	else
 		draw_summary(d);
