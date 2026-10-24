@@ -26,7 +26,6 @@
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
-#include "stdio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -131,7 +130,7 @@ static uint32_t last_r_cnt = 0;
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-void MPU_Config(void);
+static void MPU_Config(void);
 /* USER CODE BEGIN PFP */
 static uint8_t contact_valid(const PWV_Metrics_t *m, uint32_t cur_ir);
 static void    lcd_collect(const PWV_Metrics_t *m, uint32_t cur_ir);
@@ -253,17 +252,14 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_DMA_Init();          /* must come before MX_ADC1_Init() */
-  MX_ADC1_Init();
+  MX_DMA_Init();
   MX_RNG_Init();
   MX_SPI5_Init();
-  MX_TIM1_Init();
+  MX_ADC1_Init();
+  MX_I2C1_Init();
   MX_TIM2_Init();
   MX_TIM6_Init();
-  MX_USART1_UART_Init();
   MX_USART3_UART_Init();
-  MX_I2C1_Init();
-
   /* USER CODE BEGIN 2 */
   /* ---- LCD first: ILI9341_Init() blocks for > 1 s, so it must run before the ADC/DMA and timers start ---- */
   ILI9341_Init();
@@ -324,7 +320,7 @@ void SystemClock_Config(void)
   /** Configure the main internal regulator output voltage
   */
   __HAL_RCC_PWR_CLK_ENABLE();
-  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
+  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE3);
 
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
@@ -334,9 +330,9 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 4;
-  RCC_OscInitStruct.PLL.PLLN = 200;
+  RCC_OscInitStruct.PLL.PLLN = 96;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
-  RCC_OscInitStruct.PLL.PLLQ = 9;
+  RCC_OscInitStruct.PLL.PLLQ = 4;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -355,10 +351,10 @@ void SystemClock_Config(void)
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_6) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK)
   {
     Error_Handler();
   }
