@@ -46,21 +46,21 @@
 #define SUM_TEXT_SIZE		2
 
 
-//===== Weight screen layout =====//
-#define W_MIN				20
-#define W_MAX				250
-#define W_DEFAULT			70
-#define W_VALUE_X			70
-#define W_VALUE_Y			60
-#define W_VALUE_SIZE		5
-#define W_BTN_Y				130
-#define W_BTN_W				64
-#define W_BTN_LABEL_DX		0           /* (W_BTN_W - 2 chars * 12 px) / 2 */
-#define W_BTN_H				40
-#define W_OK_X				90
-#define W_OK_Y				190
-#define W_OK_W				140
-#define W_OK_H				40
+//===== Height screen layout =====//
+#define HGT_MIN				100         /* [cm] */
+#define HGT_MAX				220         /* [cm] */
+#define HGT_DEFAULT			175         /* [cm] same value the sensor code used before the page existed */
+#define HGT_VALUE_X			70
+#define HGT_VALUE_Y			60
+#define HGT_VALUE_SIZE		5
+#define HGT_BTN_Y			130
+#define HGT_BTN_W			64
+#define HGT_BTN_LABEL_DX	0           /* (HGT_BTN_W - 2 chars * 12 px) / 2 */
+#define HGT_BTN_H			40
+#define HGT_OK_X			90
+#define HGT_OK_Y			190
+#define HGT_OK_W			140
+#define HGT_OK_H			40
 #define COLOR_BTN			0x2945      /* dark grey */
 
 #define DEBUG_TOUCH			1           /* 1 = plot a white dot at every touch position */
@@ -77,9 +77,9 @@
 
 
 //===== State =====//
-static t_display_screen		s_screen   = SCREEN_WEIGHT;   /* weight first */
+static t_display_screen		s_screen   = SCREEN_HEIGHT;   /* height first */
 static uint8_t				s_redraw   = 1;      /* need full clear */
-static uint16_t				s_weight   = W_DEFAULT;   /* [kg] */
+static uint16_t				s_height   = HGT_DEFAULT;   /* [cm] */
 static uint16_t				s_ecg_x    = 0;
 static int16_t				s_prev_y   = ECG_BASE_Y;
 
@@ -93,8 +93,8 @@ static uint16_t				s_act_min    = 0,    s_act_max = 4095; /* range used to draw 
 static uint8_t				s_act_valid  = 0;
 
 
-//===== Weight buttons =====//
-static const struct { uint16_t x; int8_t step; const char *label; } s_wbtn[4] = {
+//===== Height buttons =====//
+static const struct { uint16_t x; int8_t step; const char *label; } s_hbtn[4] = {
 	{  17, -5, "-5" }, {  91, -1, "-1" }, { 165, +1, "+1" }, { 239, +5, "+5" }
 };
 
@@ -240,29 +240,29 @@ static void draw_summary(const t_collected_data *d)
 }
 
 
-static void draw_weight_value(void)
+static void draw_height_value(void)
 {
 	char	buf[12];
 
-	snprintf(buf, sizeof(buf), "%3u kg", (unsigned)s_weight);
-	ILI9341_Draw_Text(buf, W_VALUE_X, W_VALUE_Y, COLOR_VALUE, W_VALUE_SIZE, COLOR_BG);
+	snprintf(buf, sizeof(buf), "%3u cm", (unsigned)s_height);
+	ILI9341_Draw_Text(buf, HGT_VALUE_X, HGT_VALUE_Y, COLOR_VALUE, HGT_VALUE_SIZE, COLOR_BG);
 }
 
-static void draw_weight(void)
+static void draw_height(void)
 {
 	if (s_redraw)
 	{
-		ILI9341_Draw_Text("ENTER YOUR WEIGHT", 40, 15, COLOR_LABEL, 2, COLOR_BG);
+		ILI9341_Draw_Text("ENTER YOUR HEIGHT", 40, 15, COLOR_LABEL, 2, COLOR_BG);
 		for (uint8_t i = 0; i < 4; i++)
 		{
-			ILI9341_Draw_Rectangle(s_wbtn[i].x, W_BTN_Y, W_BTN_W, W_BTN_H, COLOR_BTN);
-			ILI9341_Draw_Text(s_wbtn[i].label, s_wbtn[i].x + W_BTN_LABEL_DX, W_BTN_Y + 13,
+			ILI9341_Draw_Rectangle(s_hbtn[i].x, HGT_BTN_Y, HGT_BTN_W, HGT_BTN_H, COLOR_BTN);
+			ILI9341_Draw_Text(s_hbtn[i].label, s_hbtn[i].x + HGT_BTN_LABEL_DX, HGT_BTN_Y + 13,
 							  COLOR_LABEL, 2, COLOR_BTN);
 		}
-		ILI9341_Draw_Rectangle(W_OK_X, W_OK_Y, W_OK_W, W_OK_H, COLOR_OK);
-		ILI9341_Draw_Text("OK", W_OK_X + 58, W_OK_Y + 13, COLOR_BG, 2, COLOR_OK);
+		ILI9341_Draw_Rectangle(HGT_OK_X, HGT_OK_Y, HGT_OK_W, HGT_OK_H, COLOR_OK);
+		ILI9341_Draw_Text("OK", HGT_OK_X + 58, HGT_OK_Y + 13, COLOR_BG, 2, COLOR_OK);
 	}
-	draw_weight_value();
+	draw_height_value();
 }
 
 
@@ -271,13 +271,13 @@ void display_init(void)
 {
 	ILI9341_Set_Rotation(SCREEN_HORIZONTAL_2);
 	ILI9341_Fill_Screen(COLOR_BG);
-	s_screen = SCREEN_WEIGHT;
+	s_screen = SCREEN_HEIGHT;
 	s_redraw = 1;
 }
 
 void display_next_screen(void)
 {
-	if (s_screen == SCREEN_WEIGHT)      /* locked until weight confirmed */
+	if (s_screen == SCREEN_HEIGHT)      /* locked until height confirmed */
 		return ;
 	s_screen = (s_screen == SCREEN_MAIN) ? SCREEN_SUMMARY : SCREEN_MAIN;
 	s_redraw = 1;
@@ -288,9 +288,9 @@ t_display_screen display_get_screen(void)
 	return (s_screen);
 }
 
-uint16_t display_get_weight(void)
+uint16_t display_get_height(void)
 {
-	return (s_weight);
+	return (s_height);
 }
 
 void display_touch(uint16_t raw_x, uint16_t raw_y)
@@ -326,22 +326,22 @@ void display_touch(uint16_t raw_x, uint16_t raw_y)
 #if DEBUG_TOUCH
 	ILI9341_Draw_Pixel(x, y, WHITE);
 #endif
-	if (s_screen != SCREEN_WEIGHT || s_redraw)
+	if (s_screen != SCREEN_HEIGHT || s_redraw)
 		return ;
-	if (y >= W_BTN_Y && y < W_BTN_Y + W_BTN_H)
+	if (y >= HGT_BTN_Y && y < HGT_BTN_Y + HGT_BTN_H)
 	{
 		for (uint8_t i = 0; i < 4; i++)
 		{
-			if (x >= s_wbtn[i].x && x < s_wbtn[i].x + W_BTN_W)
+			if (x >= s_hbtn[i].x && x < s_hbtn[i].x + HGT_BTN_W)
 			{
-				int16_t w = (int16_t)s_weight + s_wbtn[i].step;
-				s_weight = (w < W_MIN) ? W_MIN : (w > W_MAX) ? W_MAX : (uint16_t)w;
-				draw_weight_value();
+				int16_t h = (int16_t)s_height + s_hbtn[i].step;
+				s_height = (h < HGT_MIN) ? HGT_MIN : (h > HGT_MAX) ? HGT_MAX : (uint16_t)h;
+				draw_height_value();
 				return ;
 			}
 		}
 	}
-	else if (y >= W_OK_Y && y < W_OK_Y + W_OK_H && x >= W_OK_X && x < W_OK_X + W_OK_W)
+	else if (y >= HGT_OK_Y && y < HGT_OK_Y + HGT_OK_H && x >= HGT_OK_X && x < HGT_OK_X + HGT_OK_W)
 	{
 		s_screen = SCREEN_MAIN;
 		s_redraw = 1;
@@ -359,8 +359,8 @@ void display_update(const t_collected_data *d)
 		s_prev_y = ECG_BASE_Y;
 		ecg_scale_reset();
 	}
-	if (s_screen == SCREEN_WEIGHT)
-		draw_weight();
+	if (s_screen == SCREEN_HEIGHT)
+		draw_height();
 	else if (s_screen == SCREEN_MAIN)
 		draw_main(d);
 	else

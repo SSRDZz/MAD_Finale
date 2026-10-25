@@ -80,7 +80,7 @@
 /* USER CODE BEGIN PV */
 /* ---- LCD ---- */
 /* Everything the LCD draws (t_collected_data from lcd_module.h), filled by lcd_collect() */
-static t_collected_data data = { .is_finger = 0, .weight = 0 };
+static t_collected_data data = { .is_finger = 0, .height = 0 };
 
 /* ---- Sensors ---- */
 /* ตัวแปรและฟังก์ชันควบคุม Buzzer แจ้งเตือน 3 วินาที (Non-blocking) */
@@ -134,6 +134,7 @@ static void MPU_Config(void);
 /* USER CODE BEGIN PFP */
 static uint8_t contact_valid(const PWV_Metrics_t *m, uint32_t cur_ir);
 static void    lcd_collect(const PWV_Metrics_t *m, uint32_t cur_ir);
+static void    height_apply_once(void);
 static void    sensor_task(void);
 static void    uart_report_task(void);
 static void    lcd_task(void);
@@ -273,9 +274,9 @@ int main(void)
   HAL_TIM_Base_Start(&htim6);                        /* เริ่ม trigger ADC 400 Hz */
   rpeak_set_t0(__HAL_TIM_GET_COUNTER(&htim2));       /* จดเวลา TIM2 ทันทีหลังเริ่ม TIM6 */
 
-  /* เริ่มต้นโมดูล PWV Metrics พร้อมกำหนดส่วนสูงผู้ใช้ 175 cm ตามสั่ง */
+  /* PWV metrics init. Height = default of the height page (175 cm) until the user presses OK. */
   pwv_metrics_init(0.0f);
-  pwv_metrics_set_height_cm(175.0f);   /* ส่วนสูง 175 cm -> ช่วงแขน L = 175 * 0.45 / 100 = 0.7875 m */
+  pwv_metrics_set_height_cm((float)display_get_height());   /* arm length L = height * 0.45 / 100 m */
 
   /* เริ่มต้นเซนเซอร์ MAX30102 */
   if (max30102_init(&hi2c1) == HAL_OK)
@@ -375,7 +376,7 @@ static uint8_t contact_valid(const PWV_Metrics_t *m, uint32_t cur_ir)
   return (cur_ir >= 10000 && m->finger_detected && m->pi_pct >= 0.4f && m->pi_pct <= 20.0f);
 }
 
-/* Sensors + weight page -> t_collected_data (what display_update() draws) */
+/* Sensors + height page -> t_collected_data (what display_update() draws) */
 static void lcd_collect(const PWV_Metrics_t *m, uint32_t cur_ir)
 {
   data.is_finger = contact_valid(m, cur_ir);
@@ -389,11 +390,11 @@ static void lcd_collect(const PWV_Metrics_t *m, uint32_t cur_ir)
   /* Vascular age is only valid after the baseline lock (0 until then) */
   data.vascular_age = (m->baseline_locked && m->height_ready && m->pwv_mps > 0.0f) ? m->vascular_age : 0.0f;
 
-  /* Weight [kg]: stays 0 until OK is pressed on the weight page, then holds the entered value.
+  /* Height [cm]: stays 0 until OK is pressed on the height page, then holds the entered value.
    * (display_update() takes a const pointer, so the display layer cannot write it for us.) */
-  if (display_get_screen() != SCREEN_WEIGHT)
+  if (display_get_screen() != SCREEN_HEIGHT)
   {
-    data.weight = display_get_weight();
+    data.height = display_get_height();
   }
 
   /* TODO: not provided by the sensor code yet -> data.bp_sys, data.bp_dia, data.hrv_rmssd stay at 0 */
@@ -505,7 +506,7 @@ static void uart_report_task(void)
       buzzer_trigger_3s();
       s_session_started = 0;
       pwv_metrics_init(0.0f);
-      pwv_metrics_set_height_cm(175.0f);
+      pwv_metrics_set_height_cm((float)display_get_height());   /* keep the height the user entered */
 
       int pi_i = (int)m.pi_pct;
       int pi_f = (int)((m.pi_pct - (float)pi_i) * 100.0f + 0.5f);
@@ -539,14 +540,29 @@ static void uart_report_task(void)
   HAL_UART_Transmit(&huart3, (uint8_t *)rep_str, (uint16_t)len, 100);
 }
 
-/* LCD: touch handling (weight page / page switch) and periodic screen refresh */
+/* Runs once, the moment OK is pressed on the height page: gives the height to the PWV
+ * calculation and restarts the measurement, so nothing computed with the default height is kept. */
+static void height_apply_once(void)
+{
+  static uint8_t applied = 0;
+
+  if (!applied && display_get_screen() != SCREEN_HEIGHT)
+  {
+    applied = 1;
+    s_session_started = 0;
+    pwv_metrics_init(0.0f);
+    pwv_metrics_set_height_cm((float)display_get_height());
+  }
+}
+
+/* LCD: touch handling (height page / page switch) and periodic screen refresh */
 static void lcd_task(void)
 {
   static uint8_t  touch_prev = 0;
   static uint32_t t_text  = 0;
   static uint32_t t_touch = 0;
 
-  if (display_get_screen() == SCREEN_WEIGHT)
+  if (display_get_screen() == SCREEN_HEIGHT)
   {
     /* poll while held (250 ms auto-repeat so +/- can be held) */
     if (TP_Touchpad_Pressed() && HAL_GetTick() - t_touch >= 250)
@@ -570,6 +586,8 @@ static void lcd_task(void)
     }
     touch_prev = touch_now;
   }
+
+  height_apply_once();   /* no-op until OK is pressed on the height page */
 
   if (HAL_GetTick() - t_text >= 200)
   {
