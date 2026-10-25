@@ -29,7 +29,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 /* Sensor side (included first so the ILI9341 colour macros RED/GREEN/... cannot leak into these headers) */
 #include "ecg_rpeak.h"
@@ -54,6 +56,9 @@
 #define ECG_HALF         (ECG_BUF_LEN / 2)
 #define ECG_AVG_N        8      /* ต้องเป็นยกกำลัง 2 (ที่ 200 Hz ค่า 4 ตัด 50 Hz พอดี)  ไฟบ้าน 50 เลยใช่ 4 200/50 = 4*/
 #define ECG_UART_ENABLE  1
+/* 1 = print the [DMA] ADC/DMA register line every 2 s. It uses HAL_Delay(5) inside the main loop,
+ * so leave it 0 normally and only switch it on to debug the ECG chain. */
+#define ECG_DEBUG_UART   0
 #define ECG_FILTER_DELAY_US  (((ECG_AVG_N - 1U) * 1000000UL) / (2U * ECG_FS_HZ))
 
 /* LCD: draw ~100 ECG columns per second (one sweep of 320 px = ~3.2 s). Increase to sweep slower. */
@@ -156,9 +161,72 @@ static inline uint16_t ecg_filter(uint16_t x)
   return (uint16_t)(avg_sum / ECG_AVG_N);
 }
 
+/* ---- HRV (RMSSD) from the ECG R-R intervals ----
+ * RMSSD = sqrt( mean( (RR[i+1] - RR[i])^2 ) ) over the last HRV_N accepted intervals.
+ * Intervals outside 300..2000 ms, or jumping > 30 % from the previous one, are treated as
+ * artifacts (missed / extra R peak) and skipped. After 3 skips in a row the gate re-seeds. */
+#define HRV_N        30
+#define HRV_MIN_N    10     /* need at least this many intervals before reporting */
+static uint16_t hrv_rr[HRV_N];
+static uint8_t  hrv_head = 0;
+static uint8_t  hrv_cnt  = 0;
+static float    hrv_rmssd_ms = 0.0f;
+
+static void hrv_add_rr(uint32_t rr_ms)
+{
+  static uint16_t prev = 0;
+  static uint8_t  rejected = 0;
+
+  if (rr_ms < 300U || rr_ms > 2000U) return;
+
+  if (prev != 0U && rejected < 3U)
+  {
+    uint32_t d = (rr_ms > prev) ? (rr_ms - prev) : (prev - rr_ms);
+    if (d * 100U > 30U * (uint32_t)prev) { rejected++; return; }
+  }
+  rejected = 0;
+  prev = (uint16_t)rr_ms;
+
+  hrv_rr[hrv_head] = prev;
+  hrv_head = (uint8_t)((hrv_head + 1U) % HRV_N);
+  if (hrv_cnt < HRV_N) hrv_cnt++;
+
+  if (hrv_cnt >= HRV_MIN_N)
+  {
+    uint8_t  i = (uint8_t)((hrv_head + HRV_N - hrv_cnt) % HRV_N);   /* oldest */
+    float    sum = 0.0f;
+    for (uint8_t k = 1; k < hrv_cnt; k++)
+    {
+      uint8_t j = (uint8_t)((i + 1U) % HRV_N);
+      float   d = (float)hrv_rr[j] - (float)hrv_rr[i];
+      sum += d * d;
+      i = j;
+    }
+    hrv_rmssd_ms = sqrtf(sum / (float)(hrv_cnt - 1U));
+  }
+}
+
+/* ADC overrun recovery: once ADC1->SR.OVR is set, the DMA stops getting requests
+ * (NDTR frozen, EOC stuck at 1). Clear it and restart the circular DMA. */
+static volatile uint32_t adc_ovr_count = 0;
+static void adc_recover_if_overrun(void)
+{
+  if (ADC1->SR & ADC_SR_OVR)
+  {
+    adc_ovr_count++;
+    HAL_ADC_Stop_DMA(&hadc1);
+    __HAL_ADC_CLEAR_FLAG(&hadc1, ADC_FLAG_OVR);
+    last_idx = 0;                                   /* DMA restarts at index 0 */
+    HAL_ADC_Start_DMA(&hadc1, (uint32_t *)ecg_buf, ECG_BUF_LEN);
+    ADC1->CR2 |= ADC_CR2_DDS;
+  }
+}
+
 /* ประมวลผลทุกตัวอย่างใหม่ที่ DMA เขียนเข้ามา */
 static void ecg_process(void)
 {
+  adc_recover_if_overrun();
+
   uint16_t idx = ECG_BUF_LEN - (uint16_t)__HAL_DMA_GET_COUNTER(hadc1.DMA_Handle);
   if (idx >= ECG_BUF_LEN) idx = 0;
 
@@ -184,6 +252,7 @@ static void ecg_process(void)
         last_r_cnt = r_peak_count;
         uint32_t t_r = r_peak_time_us - ECG_FILTER_DELAY_US;      /* หักดีเลย์ตัวกรองแล้ว */
         pwv_metrics_feed_ecg_rpeak(t_r, heart_rate_bpm, rr_last_ms);
+        hrv_add_rr((uint32_t)rr_last_ms);
     }
 
     /* LCD: draw every ECG_DISP_DECIM-th filtered sample (does nothing unless the main screen is showing) */
@@ -269,7 +338,18 @@ int main(void)
 
   /* ---- Sensors ---- */
   rpeak_init();
-  HAL_ADC_Start_DMA(&hadc1, (uint32_t *)ecg_buf, ECG_BUF_LEN);
+  /* adc.c is generated with DMAContinuousRequests = DISABLE (DDS = 0): the ADC then stops issuing
+   * DMA requests after the first full circular pass -> OVR. Force it on here. Also fix it in
+   * CubeMX (ADC1 > Parameter Settings > DMA Continuous Requests = Enabled) so regeneration keeps it. */
+  hadc1.Init.DMAContinuousRequests = ENABLE;
+  HAL_StatusTypeDef adc_st = HAL_ADC_Start_DMA(&hadc1, (uint32_t *)ecg_buf, ECG_BUF_LEN);
+  ADC1->CR2 |= ADC_CR2_DDS;   /* force DDS = 1 in hardware; do not rely on the HAL to apply the Init field */
+  {
+    /* TEMP debug: 0 = OK. Remove when the ECG works. */
+    char b[40];
+    int n = snprintf(b, sizeof(b), "ADC DMA start: %d\r\n", (int)adc_st);
+    HAL_UART_Transmit(&huart3, (uint8_t *)b, (uint16_t)n, 100);
+  }
   HAL_TIM_Base_Start(&htim2);
   HAL_TIM_Base_Start(&htim6);                        /* เริ่ม trigger ADC 400 Hz */
   rpeak_set_t0(__HAL_TIM_GET_COUNTER(&htim2));       /* จดเวลา TIM2 ทันทีหลังเริ่ม TIM6 */
@@ -387,8 +467,17 @@ static void lcd_collect(const PWV_Metrics_t *m, uint32_t cur_ir)
   float spo2 = m->baseline_locked ? m->spo2_avg_10s : m->spo2_pct;
   data.spo2 = (uint8_t)(spo2 + 0.5f);
 
-  /* Vascular age is only valid after the baseline lock (0 until then) */
-  data.vascular_age = (m->baseline_locked && m->height_ready && m->pwv_mps > 0.0f) ? m->vascular_age : 0.0f;
+  /* Vascular age: a new value is taken only when the baseline is locked and valid. It is then HELD,
+   * so it stays on the LCD after the finger is lifted (pwv_metrics_init() on finger loss clears the
+   * module's own value, but not this copy). It shows 0 until the first lock. A later lock replaces it. */
+  {
+    static float s_vage_held = 0.0f;
+    if (m->baseline_locked && m->height_ready && m->pwv_mps > 0.0f && m->vascular_age > 0.0f)
+    {
+      s_vage_held = m->vascular_age;
+    }
+    data.vascular_age = s_vage_held;
+  }
 
   /* Height [cm]: stays 0 until OK is pressed on the height page, then holds the entered value.
    * (display_update() takes a const pointer, so the display layer cannot write it for us.) */
@@ -397,7 +486,10 @@ static void lcd_collect(const PWV_Metrics_t *m, uint32_t cur_ir)
     data.height = display_get_height();
   }
 
-  /* TODO: not provided by the sensor code yet -> data.bp_sys, data.bp_dia, data.hrv_rmssd stay at 0 */
+  /* HRV: RMSSD in ms, 0 until HRV_MIN_N valid R-R intervals have been collected */
+  data.hrv_rmssd = (hrv_cnt >= HRV_MIN_N) ? hrv_rmssd_ms : 0.0f;
+
+  /* TODO: not provided by the sensor code yet -> data.bp_sys, data.bp_dia stay at 0 */
 }
 
 static void sensor_task(void)
@@ -538,6 +630,51 @@ static void uart_report_task(void)
   }
 
   HAL_UART_Transmit(&huart3, (uint8_t *)rep_str, (uint16_t)len, 100);
+
+#if ECG_DEBUG_UART
+  /* Debug: DMA / ADC state.
+   *  - ndtr n1->n2 : read 5 ms apart. At 400 Hz, n2 should be ~2 lower than n1 (wraps 1->512).
+   *                  If both are equal, the DMA is NOT running.
+   *  - cr          : DMA2_Stream0->CR  (bit0 EN must be 1, bit8 CIRC must be 1)
+   *  - adcSR       : ADC1->SR          (bit5 OVR = overrun, bit1 EOC)
+   *  - adcCR2      : ADC1->CR2         (bit0 ADON, bit8 DMA, bit9 DDS, bit28-29 EXTEN)
+   *  - buf0/1/255  : raw samples straight from the DMA buffer (before the filter)
+   *  - min/max     : range of the filtered ecg_filt[] array
+   */
+  {
+    char dbg[256];
+    uint16_t lo = 4095, hi = 0;
+    uint32_t n1, n2;
+
+    if (SCB->CCR & SCB_CCR_DC_Msk)
+    {
+      SCB_InvalidateDCache_by_Addr((uint32_t *)ecg_buf, sizeof(ecg_buf));
+    }
+    for (uint16_t i = 0; i < ECG_BUF_LEN; i++)
+    {
+      uint16_t v = ecg_filt[i];
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
+
+    n1 = DMA2_Stream0->NDTR;
+    HAL_Delay(5);
+    n2 = DMA2_Stream0->NDTR;
+
+    int n = snprintf(dbg, sizeof(dbg),
+        "[DMA] ndtr:%lu->%lu cr:0x%lx adcSR:0x%lx adcCR2:0x%lx last_idx:%u buf0:%u buf1:%u buf255:%u | min:%u max:%u rpk:%lu hr:%u ovr:%lu\r\n",
+        (unsigned long)n1, (unsigned long)n2,
+        (unsigned long)DMA2_Stream0->CR,
+        (unsigned long)ADC1->SR,
+        (unsigned long)ADC1->CR2,
+        (unsigned)last_idx,
+        (unsigned)ecg_buf[0], (unsigned)ecg_buf[1], (unsigned)ecg_buf[255],
+        (unsigned)lo, (unsigned)hi,
+        (unsigned long)r_peak_count, (unsigned)heart_rate_bpm,
+        (unsigned long)adc_ovr_count);
+    HAL_UART_Transmit(&huart3, (uint8_t *)dbg, (uint16_t)n, 100);
+  }
+#endif /* ECG_DEBUG_UART */
 }
 
 /* Runs once, the moment OK is pressed on the height page: gives the height to the PWV

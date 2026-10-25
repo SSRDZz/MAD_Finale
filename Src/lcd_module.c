@@ -2,6 +2,7 @@
 
 #include "ILI9341_STM32_Driver.h"
 #include "ILI9341_GFX.h"
+#include "stdio.h"
 #include "stdlib.h"
 
 //===== Screen =====//
@@ -44,6 +45,7 @@
 #define SUM_FIRST_Y			38
 #define SUM_STEP_Y			28
 #define SUM_TEXT_SIZE		2
+#define SUM_HINT_Y			208         /* "Place finger firmly" row, under the last value row */
 
 
 //===== Height screen layout =====//
@@ -62,6 +64,10 @@
 #define HGT_OK_W			140
 #define HGT_OK_H			40
 #define COLOR_BTN			0x2945      /* dark grey */
+
+#ifndef TOUCH_X_OFFSET
+#define TOUCH_X_OFFSET		0           /* [px] added to x after mapping; 0 = off */
+#endif
 
 #define DEBUG_TOUCH			1           /* 1 = plot a white dot at every touch position */
 
@@ -180,63 +186,101 @@ static void draw_main(const t_collected_data *d)
 	}
 }
 
+/* one summary row, padded to 20 chars so a shorter text fully overwrites the previous one */
+static void sum_row(uint16_t y, uint16_t col, const char *txt)
+{
+	char	buf[24];
+
+	snprintf(buf, sizeof(buf), "%-20s", txt);
+	ILI9341_Draw_Text(buf, SUM_X, y, col, SUM_TEXT_SIZE, COLOR_BG);
+}
+
+/* Every row is always drawn: a value that is not available (0 / no finger) is shown as "---"
+ * instead of hiding the whole page, so a stale or missing value can never be mistaken for a reading.
+ *   ECG based     : HR, HRV
+ *   MAX30102 based: SpO2, PI (need a valid finger contact)
+ *   always shown   : vascular age (0 until the first baseline lock, then held by main.c)
+ *   no source yet : BP                                                                             */
 static void draw_summary(const t_collected_data *d)
 {
-	char		buf[32];
+	char		buf[24];
 	uint16_t	y = SUM_FIRST_Y;
 	const char	*st;
 	uint16_t	col;
 	int			pi10;
+	uint8_t		has_ecg = (d->bpm > 0);
+	uint8_t		has_ppg = (d->is_finger != 0);
 
 	if (s_redraw)
 		ILI9341_Draw_Text("SUMMARY (tap = back)", SUM_X, SUM_TITLE_Y, COLOR_LABEL, 2, COLOR_BG);
 
-	if (!d->is_finger)
-	{
-		ILI9341_Draw_Text("Place finger firmly", SUM_X, y, COLOR_WARN, SUM_TEXT_SIZE, COLOR_BG);
-		return ;
-	}
-
-	snprintf(buf, sizeof(buf), "BP   %3u/%3u mmHg ", (unsigned)d->bp_sys, (unsigned)d->bp_dia);
-	ILI9341_Draw_Text(buf, SUM_X, y, COLOR_VALUE, SUM_TEXT_SIZE, COLOR_BG);
+	/* HR (ECG) */
+	if (has_ecg)
+		snprintf(buf, sizeof(buf), "HR   %3u bpm", (unsigned)d->bpm);
+	else
+		snprintf(buf, sizeof(buf), "HR   --- bpm");
+	sum_row(y, COLOR_BPM, buf);
 	y += SUM_STEP_Y;
 
-	snprintf(buf, sizeof(buf), "HR   %3u bpm     ", (unsigned)d->bpm);
-	ILI9341_Draw_Text(buf, SUM_X, y, COLOR_BPM, SUM_TEXT_SIZE, COLOR_BG);
+	/* SpO2 (MAX30102) */
+	if (has_ppg && d->spo2 > 0)
+		snprintf(buf, sizeof(buf), "SpO2 %3u %%", (unsigned)d->spo2);
+	else
+		snprintf(buf, sizeof(buf), "SpO2 --- %%");
+	sum_row(y, COLOR_SPO2, buf);
 	y += SUM_STEP_Y;
 
-	snprintf(buf, sizeof(buf), "SpO2 %3u %%       ", (unsigned)d->spo2);
-	ILI9341_Draw_Text(buf, SUM_X, y, COLOR_SPO2, SUM_TEXT_SIZE, COLOR_BG);
-	y += SUM_STEP_Y;
-
-	/* HRV + status (int math, no %f needed) */
-	if (d->hrv_rmssd >= HRV_RELAXED_MIN)
+	/* HRV + status (ECG, int math, no %f needed). 0 = not enough R-R intervals yet. */
+	if (d->hrv_rmssd > 0.0f)
 	{
-		st  = "Relaxed ";
-		col = COLOR_OK;
-	}
-	else if (d->hrv_rmssd <= HRV_STRESSED_MAX)
-	{
-		st  = "Stressed";
-		col = COLOR_BAD;
+		if (d->hrv_rmssd >= HRV_RELAXED_MIN)
+		{
+			st  = "Relaxed ";
+			col = COLOR_OK;
+		}
+		else if (d->hrv_rmssd <= HRV_STRESSED_MAX)
+		{
+			st  = "Stressed";
+			col = COLOR_BAD;
+		}
+		else
+		{
+			st  = "Normal  ";
+			col = COLOR_WARN;
+		}
+		snprintf(buf, sizeof(buf), "HRV  %3d ms ", (int)(d->hrv_rmssd + 0.5f));
 	}
 	else
 	{
-		st  = "Normal  ";
-		col = COLOR_WARN;
+		st  = "        ";
+		col = COLOR_BG;
+		snprintf(buf, sizeof(buf), "HRV  ---    ");
 	}
-	snprintf(buf, sizeof(buf), "HRV  %3d ms ", (int)(d->hrv_rmssd + 0.5f));
 	ILI9341_Draw_Text(buf, SUM_X, y, COLOR_VALUE, SUM_TEXT_SIZE, COLOR_BG);
 	ILI9341_Draw_Text(st, SUM_X + 12 * 12, y, col, SUM_TEXT_SIZE, COLOR_BG);
 	y += SUM_STEP_Y;
 
-	pi10 = (int)(d->pi * 10.0f + 0.5f);
-	snprintf(buf, sizeof(buf), "PI   %d.%d %%      ", pi10 / 10, pi10 % 10);
-	ILI9341_Draw_Text(buf, SUM_X, y, COLOR_VALUE, SUM_TEXT_SIZE, COLOR_BG);
+	/* PI (MAX30102) */
+	if (has_ppg)
+	{
+		pi10 = (int)(d->pi * 10.0f + 0.5f);
+		snprintf(buf, sizeof(buf), "PI   %d.%d %%", pi10 / 10, pi10 % 10);
+	}
+	else
+		snprintf(buf, sizeof(buf), "PI   --- %%");
+	sum_row(y, COLOR_VALUE, buf);
 	y += SUM_STEP_Y;
 
-	snprintf(buf, sizeof(buf), "Vascular age %2d  ", (int)(d->vascular_age + 0.5f));
-	ILI9341_Draw_Text(buf, SUM_X, y, COLOR_VALUE, SUM_TEXT_SIZE, COLOR_BG);
+	/* Vascular age: always shown. main.c holds the last locked value (0 until the first lock),
+	 * so it stays on screen after the finger is lifted. */
+	snprintf(buf, sizeof(buf), "Vascular age %2d", (int)(d->vascular_age + 0.5f));
+	sum_row(y, COLOR_VALUE, buf);
+
+	/* hint row: text while there is no valid finger contact, blank otherwise */
+	if (!has_ppg)
+		sum_row(SUM_HINT_Y, COLOR_WARN, "Place finger firmly");
+	else
+		sum_row(SUM_HINT_Y, COLOR_BG, "");
 }
 
 
